@@ -75,6 +75,8 @@
                 <h2 class="text-2xl font-semibold mb-4 text-red-600 border-b pb-2">
                     Which class is winning!
                 </h2>
+                <!-- Removed: Button to copy the URL for opening in a new tab/sharing -->
+                
                 <!-- Updated border and background colors to use red shades -->
                 <div class="relative w-full overflow-hidden border-4 border-dashed border-red-200 rounded-lg bg-red-50" style="height: 600px;">
                     <canvas id="fundraisingChart" class="w-full h-full"></canvas>
@@ -127,13 +129,14 @@
         const displayScreen = document.getElementById('display-screen');
         const navDashboard = document.getElementById('nav-dashboard');
         const navDisplay = document.getElementById('nav-display');
+        // Removed: const shareLinkButton = document.getElementById('share-link-button');
 
         // Initial list of classes to track
         const CLASS_LIST = ['3F', '3V', '4S', '4T', '5L', '5N', '5W', '6NW', '6SW', '7B', '7KV', '7SV'];
         
         // Default data structure if no data exists in Firestore
         const DEFAULT_DATA = CLASS_LIST.reduce((acc, className) => {
-            acc[className] = 0;
+            acc[className] = 1; 
             return acc;
         }, { lastUpdated: new Date().toISOString() });
         
@@ -192,6 +195,8 @@
             }, 3000);
         }
 
+        // Removed: window.copyLeaderboardLink function
+
         /**
          * Converts the class object data into an array of {name, total} objects,
          * filters for valid entries, and sorts them by total (highest to lowest).
@@ -205,9 +210,9 @@
                 .filter(key => CLASS_LIST.includes(key)) // Only include tracked classes
                 .map(key => ({ 
                     name: key, 
-                    total: parseInt(data[key] || 0) 
+                    total: parseInt(data[key] || 1) // Ensures minimum display of 1
                 }))
-                // CHANGED: Sort in DESCENDING order (b - a) so winner is at index 0
+                // Sort in DESCENDING order (b - a) so winner is at index 0
                 .sort((a, b) => b.total - a.total); 
         }
 
@@ -323,14 +328,14 @@
             inputForm.innerHTML = ''; 
             
             CLASS_LIST.forEach(className => {
-                const currentValue = parseInt(data[className] || 0);
+                const currentValue = parseInt(data[className] || 1); // Default to 1
 
                 const div = document.createElement('div');
                 div.className = 'flex items-center space-x-3 bg-gray-50 p-3 rounded-lg border shadow-sm hover:border-red-400 transition';
                 div.innerHTML = `
                     <label for="input-${className}" class="flex-none font-medium text-gray-700 w-16">${className}:</label>
                     <div class="relative flex-grow">
-                        <input type="number" id="input-${className}" value="${currentValue}" min="0" step="1"
+                        <input type="number" id="input-${className}" value="${currentValue}" min="1" step="1"
                                class="w-full pl-3 pr-2 py-2 border border-gray-300 rounded-lg focus:ring-red-500 focus:border-red-500 transition duration-150"
                                placeholder="Enter book count">
                     </div>
@@ -340,8 +345,8 @@
                 
                 // Event listener to save data on input blur (focus lost)
                 inputElement.addEventListener('blur', (e) => {
-                    let newValue = parseInt(e.target.value) || 0;
-                    if (newValue < 0) newValue = 0; 
+                    let newValue = parseInt(e.target.value) || 1; // Default to 1 if input is cleared
+                    if (newValue < 1) newValue = 1; // Enforce minimum of 1
                     e.target.value = newValue; 
                     
                     if (newValue !== currentValue) {
@@ -380,7 +385,7 @@
             const barHeight = chartHeight / (barCount * 1.5);
             const barSpacing = barHeight / 2;
             
-            // CHANGED: Winner is now always the first element (index 0) after descending sort
+            // Winner is always the first element (index 0) after descending sort
             const maxTotal = dataArray[0].total; 
             
             // Clear canvas
@@ -393,9 +398,6 @@
             const target = Math.max(maxTotal * 1.15, 1000); // Give 15% room for labels
             ctx.fillText(`Top Score: ${maxTotal.toLocaleString()} Books`, chartWidth + padding, padding - 20);
 
-            // Determine the winner for highlighting
-            const winnerName = dataArray[0].name; // Winner is at index 0
-            
             // Draw Bars
             dataArray.forEach((item, index) => {
                 const y = padding + index * (barHeight + barSpacing);
@@ -404,10 +406,9 @@
                 const barLength = (item.total / target) * chartWidth;
                 
                 // Determine colors based on palette and winner status
-                // Winner is the item at index 0
                 const isWinner = index === 0; 
                 
-                // Use a rotating color from the pallete for bars
+                // Use gold/yellow for the winner
                 const barColor = isWinner ? '#f59e0b' : BAR_COLORS[index % BAR_COLORS.length]; 
                 const winnerTextColor = '#ef4444'; // Bright Red (for text)
 
@@ -466,3 +467,5 @@
     </script>
 </body>
 </html>
+
+
