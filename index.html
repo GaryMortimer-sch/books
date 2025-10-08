@@ -129,8 +129,7 @@
         const displayScreen = document.getElementById('display-screen');
         const navDashboard = document.getElementById('nav-dashboard');
         const navDisplay = document.getElementById('nav-display');
-        // Removed: const shareLinkButton = document.getElementById('share-link-button');
-
+        
         // Initial list of classes to track
         const CLASS_LIST = ['3F', '3V', '4S', '4T', '5L', '5N', '5W', '6NW', '6SW', '7B', '7KV', '7SV'];
         
@@ -195,8 +194,6 @@
             }, 3000);
         }
 
-        // Removed: window.copyLeaderboardLink function
-
         /**
          * Converts the class object data into an array of {name, total} objects,
          * filters for valid entries, and sorts them by total (highest to lowest).
@@ -223,6 +220,15 @@
          */
         async function setupFirebase() {
             try {
+                // Fix: Check if the configuration object is valid before initialization
+                if (!firebaseConfig || !firebaseConfig.projectId) {
+                    console.error("CRITICAL ERROR: Firebase configuration is missing 'projectId'. Cannot initialize Firebase.");
+                    authStatus.textContent = `CRITICAL ERROR: Firebase setup failed (Missing Project ID). Data is static.`;
+                    loadingInputs.classList.add('hidden');
+                    renderInputs(DEFAULT_DATA); // Render inputs with static defaults
+                    return; // Stop execution if configuration is invalid
+                }
+
                 const app = initializeApp(firebaseConfig);
                 db = getFirestore(app);
                 auth = getAuth(app);
@@ -467,5 +473,7 @@
     </script>
 </body>
 </html>
+
+
 
 
