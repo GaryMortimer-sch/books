@@ -6,6 +6,8 @@
     <title>Clifton Book Drive 2025</title>
     <!-- Load Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Chart.js for reliable and aesthetic charting -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
     <!-- Set Inter font for modern look -->
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
@@ -73,12 +75,11 @@
             <div class="p-6 bg-white rounded-xl shadow-2xl border border-gray-100">
                 <!-- Updated heading color to red-600 and text changed -->
                 <h2 class="text-2xl font-semibold mb-4 text-red-600 border-b pb-2">
-                    Which class is winning!
+                    Which class is winning! (Live Leaderboard)
                 </h2>
-                <!-- Removed: Button to copy the URL for opening in a new tab/sharing -->
                 
                 <!-- Updated border and background colors to use red shades -->
-                <div class="relative w-full overflow-hidden border-4 border-dashed border-red-200 rounded-lg bg-red-50" style="height: 600px;">
+                <div class="relative w-full overflow-hidden border-4 border-dashed border-red-200 rounded-lg bg-red-50 p-4" style="height: 600px;">
                     <canvas id="fundraisingChart" class="w-full h-full"></canvas>
                     <div id="chart-overlay" class="absolute inset-0 flex items-center justify-center bg-white/70 backdrop-blur-sm hidden">
                         <!-- Updated chart overlay text color to red-600 -->
@@ -86,14 +87,14 @@
                     </div>
                 </div>
                 <div class="mt-4 text-center">
-                    <p class="text-sm text-gray-500">The current leader is highlighted in <span class="text-red-600 font-bold">Red</span> and <span class="text-yellow-600 font-bold">Gold</span>.</p>
+                    <p class="text-sm text-gray-500">The current leader is highlighted with a **Golden** bar!</p>
                 </div>
             </div>
         </div>
 
     </div>
 
-    <!-- Firebase SDKs -->
+    <!-- Firebase SDKs and Chart Logic -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
@@ -113,13 +114,13 @@
         let userId = null;
         let currentData = null; // Store fetched data globally
         let currentPage = 'dashboard'; // Initial page state
-        let isInitialLoadComplete = false; // NEW FLAG for controlling loading spinner state
+        let isInitialLoadComplete = false; 
+        let chartInstance = null; // Global Chart.js instance
 
         const CHART_DOC_PATH = `/artifacts/${appId}/public/data/fundraising_data`;
         const CHART_DOC_ID = 'clifton_book_drive';
 
         const canvas = document.getElementById('fundraisingChart');
-        const ctx = canvas.getContext('2d');
         const inputForm = document.getElementById('input-form');
         const loadingInputs = document.getElementById('loading-inputs');
         const messageBox = document.getElementById('message-box');
@@ -142,18 +143,18 @@
         
         // Pallete of colors for the chart
         const BAR_COLORS = [
-            '#4c51bf', // Indigo
-            '#38b2ac', // Teal
-            '#e53e3e', // Red
-            '#dd6b20', // Orange
-            '#d69e2e', // Yellow
-            '#3182ce', // Blue
-            '#805ad5', // Purple
-            '#38a169', // Green
-            '#ed64a6', // Pink
-            '#a0aec0', // Gray
-            '#718096', // Dark Gray
-            '#4a5568', // Slate
+            '#ef4444', // Red 500
+            '#f97316', // Orange 500
+            '#eab308', // Yellow 500
+            '#22c55e', // Green 500
+            '#06b6d4', // Cyan 500
+            '#3b82f6', // Blue 500
+            '#8b5cf6', // Violet 500
+            '#ec4899', // Pink 500
+            '#6b7280', // Gray 500
+            '#ca8a04', // Amber 600
+            '#16a34a', // Green 600
+            '#075985', // Sky 800
         ];
 
 
@@ -174,7 +175,7 @@
             navDashboard.className = `px-4 py-2 mx-2 rounded-full font-semibold transition duration-200 shadow-md ${page === 'dashboard' ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-white text-red-600 hover:bg-red-50 border border-red-600'}`;
             navDisplay.className = `px-4 py-2 mx-2 rounded-full font-semibold transition duration-200 shadow-md ${page === 'display' ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-white text-red-600 hover:bg-red-50 border border-red-600'}`;
 
-            // Re-render chart if navigating to the display page
+            // Re-render chart if navigating to the display page AND data is loaded
             if (page === 'display' && currentData) {
                 renderChart(currentData);
             }
@@ -221,14 +222,15 @@
          */
         async function setupFirebase() {
             try {
-                // Fix: Check if the configuration object is valid before initialization
+                // Check if the configuration object is valid before initialization
                 if (!firebaseConfig || !firebaseConfig.projectId) {
                     console.error("CRITICAL ERROR: Firebase configuration is missing 'projectId'. Cannot initialize Firebase.");
                     authStatus.textContent = `CRITICAL ERROR: Firebase setup failed (Missing Project ID). Data is static.`;
                     loadingInputs.classList.add('hidden'); 
                     renderInputs(DEFAULT_DATA); 
-                    isInitialLoadComplete = true; // Mark as complete even on static path
-                    return; // Stop execution if configuration is invalid
+                    isInitialLoadComplete = true; 
+                    currentData = DEFAULT_DATA;
+                    return; 
                 }
 
                 const app = initializeApp(firebaseConfig);
@@ -247,23 +249,22 @@
                         userId = user.uid;
                         authStatus.textContent = `User ID: ${userId} (Live Updates Active)`;
                         
-                        // Start listening for real-time updates and initial data sync
                         await initializeDataAndListeners();
                     } else {
                         authStatus.textContent = `Authentication failed. Using default data.`;
                         userId = null;
-                        // Render inputs and chart with default data if auth fails
-                        loadingInputs.classList.add('hidden'); // Hide if auth fails
+                        loadingInputs.classList.add('hidden'); 
                         renderInputs(DEFAULT_DATA);
+                        currentData = DEFAULT_DATA;
                         isInitialLoadComplete = true; 
                     }
-                    navigate(currentPage); // Ensure correct screen is shown after auth
+                    // navigate(currentPage); // Navigation is handled when the first snapshot arrives or setup fails
                 });
 
             } catch (error) {
                 console.error("Error setting up Firebase:", error);
                 authStatus.textContent = `Firebase Error: ${error.message}`;
-                loadingInputs.classList.add('hidden'); // Hide on general error
+                loadingInputs.classList.add('hidden'); 
             }
         }
 
@@ -283,28 +284,34 @@
             // Set up real-time listener
             onSnapshot(docRef, (doc) => {
                 const data = doc.data() || DEFAULT_DATA;
-                currentData = data; // Update global data
+                currentData = data; 
                 
-                // FIX: Only hide the loading spinner once the initial data snapshot is received
+                // Only hide the loading spinner once the initial data snapshot is received
                 if (!isInitialLoadComplete) {
                     loadingInputs.classList.add('hidden');
                     isInitialLoadComplete = true;
+                    // Navigate to the correct page after initial load
+                    navigate(currentPage);
                 }
                 
-                chartOverlay.classList.add('hidden'); // Hide overlay after data received
+                chartOverlay.classList.add('hidden'); 
                 renderInputs(data);
                 
-                // Only render the chart if the user is on the display screen
+                // Update chart if currently visible
                 if (currentPage === 'display') {
                     renderChart(data);
                 }
             }, (error) => {
                 console.error("Snapshot listener error:", error);
                 chartOverlay.classList.add('hidden');
-                loadingInputs.classList.add('hidden'); // Ensure spinner is hidden on listener error
+                loadingInputs.classList.add('hidden'); 
+                
+                // If the listener fails, we can't get data, so navigate anyway.
+                if (!isInitialLoadComplete) {
+                    navigate(currentPage);
+                    isInitialLoadComplete = true;
+                }
             });
-            
-            // Removed premature hiding of loadingInputs from here.
         }
         
         /**
@@ -321,7 +328,7 @@
             const docRef = doc(db, CHART_DOC_PATH, CHART_DOC_ID);
             
             try {
-                chartOverlay.classList.remove('hidden'); // Show overlay while data is being written
+                chartOverlay.classList.remove('hidden'); 
 
                 await setDoc(docRef, { 
                     [className]: total,
@@ -363,10 +370,12 @@
                 
                 // Event listener to save data on input blur (focus lost)
                 inputElement.addEventListener('blur', (e) => {
-                    let newValue = parseInt(e.target.value) || 1; // Default to 1 if input is cleared
-                    if (newValue < 1) newValue = 1; // Enforce minimum of 1
+                    let newValue = parseInt(e.target.value) || 1; 
+                    if (newValue < 1) newValue = 1; 
                     e.target.value = newValue; 
                     
+                    // Only save if the value has genuinely changed from the Firebase data (currentValue)
+                    // The onSnapshot listener will handle updating the chart immediately.
                     if (newValue !== currentValue) {
                         saveData(className, newValue);
                     }
@@ -384,107 +393,123 @@
         }
 
         /**
-         * Draws the horizontal bar chart on the canvas.
+         * Creates or updates the Chart.js horizontal bar chart.
          * @param {Object} data 
          */
         function renderChart(data) {
             const dataArray = prepareData(data);
             if (dataArray.length === 0) return;
 
-            // Set canvas size dynamically based on its container
-            const container = canvas.parentElement;
-            canvas.width = container.clientWidth;
-            canvas.height = container.clientHeight;
+            const labels = dataArray.map(item => item.name);
+            const totals = dataArray.map(item => item.total);
+            const backgroundColors = dataArray.map((_, index) => {
+                // Winner is the first item after sorting (index 0)
+                return index === 0 ? '#f59e0b' : BAR_COLORS[index % BAR_COLORS.length]; // Gold for winner
+            });
 
-            const padding = 60; // Increased padding for better text visibility
-            const chartHeight = canvas.height - 2 * padding;
-            const chartWidth = canvas.width - 2 * padding;
-            const barCount = dataArray.length;
-            const barHeight = chartHeight / (barCount * 1.5);
-            const barSpacing = barHeight / 2;
-            
-            // Winner is always the first element (index 0) after descending sort
-            const maxTotal = dataArray[0].total; 
-            
-            // Clear canvas
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            const borderColors = dataArray.map((_, index) => {
+                return index === 0 ? '#ca8a04' : backgroundColors[index];
+            });
 
-            // X-axis (Max Value Text)
-            ctx.font = "14px Inter, sans-serif";
-            ctx.fillStyle = '#b91c1c'; // Darker red for text contrast
-            ctx.textAlign = 'right';
-            const target = Math.max(maxTotal * 1.15, 1000); // Give 15% room for labels
-            ctx.fillText(`Top Score: ${maxTotal.toLocaleString()} Books`, chartWidth + padding, padding - 20);
+            // Destroy existing chart instance if it exists
+            if (chartInstance) {
+                chartInstance.data.labels = labels;
+                chartInstance.data.datasets[0].data = totals;
+                chartInstance.data.datasets[0].backgroundColor = backgroundColors;
+                chartInstance.data.datasets[0].borderColor = borderColors;
+                chartInstance.update();
+                return;
+            }
 
-            // Draw Bars
-            dataArray.forEach((item, index) => {
-                const y = padding + index * (barHeight + barSpacing);
-                
-                // Calculate bar length relative to the target/max
-                const barLength = (item.total / target) * chartWidth;
-                
-                // Determine colors based on palette and winner status
-                const isWinner = index === 0; 
-                
-                // Use gold/yellow for the winner
-                const barColor = isWinner ? '#f59e0b' : BAR_COLORS[index % BAR_COLORS.length]; 
-                const winnerTextColor = '#ef4444'; // Bright Red (for text)
-
-                // 1. Draw the Bar
-                ctx.fillStyle = barColor;
-                ctx.fillRect(padding, y, barLength, barHeight);
-
-                // 2. Draw the Class Label (Y-Axis)
-                ctx.fillStyle = '#1f2937';
-                ctx.font = "bold 15px Inter, sans-serif";
-                ctx.textAlign = 'right';
-                ctx.fillText(item.name, padding - 10, y + barHeight / 2 + 5);
-
-                // 3. Draw the Value Label (On the bar or slightly outside)
-                const textX = Math.max(barLength + 10, padding + 70); // Ensure label is visible if bar is tiny
-                
-                ctx.fillStyle = isWinner ? winnerTextColor : '#374151'; // Darker gray for non-winners
-                ctx.font = isWinner ? "bold 18px Inter, sans-serif" : "16px Inter, sans-serif";
-                ctx.textAlign = 'left';
-
-                const labelText = item.total.toLocaleString();
-                ctx.fillText(labelText, textX, y + barHeight / 2 + 5);
-                
-                // Winner indicator
-                if (isWinner) {
-                    ctx.font = "bold 12px Inter, sans-serif";
-                    ctx.fillStyle = winnerTextColor; 
-                    ctx.fillText("CURRENT WINNER!", textX, y + barHeight / 2 - 15);
+            // Create new chart instance
+            chartInstance = new Chart(canvas, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Books Collected',
+                        data: totals,
+                        backgroundColor: backgroundColors,
+                        borderColor: borderColors,
+                        borderWidth: 1,
+                        borderRadius: 8,
+                        borderSkipped: false,
+                    }]
+                },
+                options: {
+                    indexAxis: 'y', // Make it a horizontal bar chart
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: false,
+                        },
+                        title: {
+                            display: true,
+                            text: 'Live Book Totals by Class',
+                            color: '#b91c1c', // Red 700
+                            font: {
+                                size: 18,
+                                weight: 'bold'
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    let label = context.dataset.label || '';
+                                    if (label) {
+                                        label += ': ';
+                                    }
+                                    if (context.parsed.x !== null) {
+                                        label += new Intl.NumberFormat('en-US').format(context.parsed.x) + ' books';
+                                    }
+                                    return label;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'Total Books',
+                                color: '#4b5563'
+                            },
+                            ticks: {
+                                color: '#1f2937',
+                                callback: function(value) {
+                                    // Use compact notation for large numbers
+                                    return Intl.NumberFormat('en-US', { notation: 'compact' }).format(value);
+                                }
+                            }
+                        },
+                        y: {
+                            ticks: {
+                                color: '#1f2937',
+                                font: {
+                                    weight: 'bold',
+                                    size: 14
+                                }
+                            },
+                            grid: {
+                                display: false // Hide horizontal grid lines
+                            }
+                        }
+                    }
                 }
             });
-            
-            // Draw Y-axis line (for structure)
-            ctx.strokeStyle = '#9ca3af';
-            ctx.lineWidth = 2;
-            ctx.beginPath();
-            ctx.moveTo(padding, padding);
-            ctx.lineTo(padding, chartHeight + padding);
-            ctx.stroke();
-            ctx.lineWidth = 1; // Reset line width
         }
         
         // --- INITIALIZATION ---
         
-        let resizeTimer;
-        window.addEventListener('resize', () => {
-            clearTimeout(resizeTimer);
-            resizeTimer = setTimeout(() => {
-                // Only re-render if on the display screen
-                if (currentPage === 'display' && currentData) {
-                    renderChart(currentData);
-                }
-            }, 250);
-        });
-
+        // Removed unnecessary resize logic as Chart.js handles responsiveness internally
+        
         setupFirebase();
     </script>
 </body>
 </html>
+
 
 
 
