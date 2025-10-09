@@ -15,14 +15,6 @@
             font-family: 'Inter', sans-serif;
             background-color: #f7f9fb;
         }
-        /* Custom scrollbar for better look */
-        .scrollbar-hidden::-webkit-scrollbar {
-            display: none;
-        }
-        .scrollbar-hidden {
-            -ms-overflow-style: none;  /* IE and Edge */
-            scrollbar-width: none;  /* Firefox */
-        }
     </style>
 </head>
 <body>
@@ -31,15 +23,14 @@
         <header class="text-center py-6 bg-white shadow-md sticky top-0 z-10">
             <!-- Updated header title color to red-700 -->
             <h1 class="text-3xl sm:text-4xl font-extrabold text-red-700">Clifton Book Drive 2025</h1>
-            <!-- Auth status replaced with Local Status message -->
+            <!-- Status now reflects Real-time database connection -->
             <p id="auth-status" class="mt-1 text-xs font-semibold text-blue-500">
-                Data saved locally on this browser using localStorage.
+                Connecting to Real-time Database...
             </p>
         </header>
 
         <!-- Navigation Bar -->
         <nav class="flex justify-center bg-gray-100 p-3 shadow-inner">
-            <!-- Updated navigation button colors to use red -->
             <button id="nav-dashboard" onclick="navigate('dashboard')" 
                 class="px-4 py-2 mx-2 rounded-full font-semibold transition duration-200 
                        bg-red-600 text-white hover:bg-red-700 shadow-md">
@@ -61,26 +52,33 @@
                 <h2 class="text-2xl font-semibold mb-4 text-red-600 border-b pb-2">
                     Update Books Collected Totals
                 </h2>
-                <div id="loading-inputs" class="text-center py-8 hidden">
-                    <!-- Loading is instant with localStorage, hide this initially -->
-                    <p class="mt-2 text-gray-500">Loading data...</p>
+                <div id="loading-inputs" class="text-center py-8">
+                    <div class="flex justify-center items-center space-x-2">
+                        <div class="h-4 w-4 bg-red-500 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
+                        <div class="h-4 w-4 bg-red-500 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
+                        <div class="h-4 w-4 bg-red-500 rounded-full animate-bounce"></div>
+                    </div>
+                    <p class="mt-4 text-gray-500">Loading real-time data...</p>
                 </div>
-                <div id="input-form" class="space-y-4 max-h-96 overflow-y-auto scrollbar-hidden">
-                    <!-- Inputs will be rendered here by JavaScript -->
+                <!-- Inputs will be rendered here by JavaScript -->
+                <div id="input-form" class="space-y-4 hidden"> 
                 </div>
                 <div id="message-box" class="mt-4 p-3 text-sm rounded-lg text-green-700 bg-green-100 hidden" role="alert"></div>
+            </div>
+            
+            <div id="user-info" class="mt-4 text-center text-xs text-gray-400">
+                <!-- User and App ID info will be displayed here -->
             </div>
         </div>
 
         <!-- --- DISPLAY (CHART) SCREEN --- -->
         <div id="display-screen" class="p-4 sm:p-8 max-w-4xl mx-auto hidden">
             <div class="p-6 bg-white rounded-xl shadow-2xl border border-gray-100">
-                <!-- Updated heading color to red-600 and text changed -->
                 <h2 class="text-2xl font-semibold mb-4 text-red-600 border-b pb-2">
-                    Which class is winning! (Local Leaderboard)
+                    Live Leaderboard
                 </h2>
                 
-                <!-- Updated border and background colors to use red shades -->
+                <!-- Updated border and background colors to use red shades - CHART CONTAINER -->
                 <div class="relative w-full overflow-hidden border-4 border-dashed border-red-200 rounded-lg bg-red-50 p-4" style="height: 600px;">
                     <canvas id="fundraisingChart" class="w-full h-full"></canvas>
                     <div id="chart-overlay" class="absolute inset-0 flex items-center justify-center bg-white/70 backdrop-blur-sm hidden">
@@ -88,6 +86,14 @@
                         <div class="animate-pulse text-red-600 text-xl font-medium">Chart Updating...</div>
                     </div>
                 </div>
+
+                <!-- Total Summary Box (Now below the chart/table) -->
+                <div id="total-summary" class="bg-red-50 p-4 mt-6 rounded-lg border-l-4 border-red-600 shadow-inner text-center">
+                    <!-- Content will be injected by JavaScript on page load/update -->
+                    <div class="text-gray-500">Loading summary...</div>
+                </div>
+                
+                <!-- FINAL NOTE - After chart and summary -->
                 <div class="mt-4 text-center">
                     <p class="text-sm text-gray-500">The current leader is highlighted with a **Golden** bar!</p>
                 </div>
@@ -96,55 +102,70 @@
 
     </div>
 
-    <!-- Local Storage and Chart Logic -->
+    <!-- Firebase and Chart Logic -->
     <script type="module">
-        // --- GLOBAL VARIABLES ---
-        let currentData = null; // Store fetched data globally
-        let currentPage = 'dashboard'; // Initial page state
-        let chartInstance = null; // Global Chart.js instance
+        // Firebase SDK Imports
+        import { initializeApp as initApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { 
+            getAuth as authFn, 
+            signInAnonymously as signInAnon, 
+            signInWithCustomToken as signInCustom, 
+            onAuthStateChanged as onAuthChange 
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { 
+            getFirestore as dbFn, 
+            doc as docRef, 
+            setDoc as setDocFn, 
+            onSnapshot as onSnapshotFn, 
+            setLogLevel 
+        } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        const LOCAL_STORAGE_KEY = 'clifton_book_drive_data';
+        // --- FIREBASE GLOBALS ---
+        let app;
+        let auth;
+        let db;
+        let appId;
+        let userId = 'unknown';
+        let isAuthReady = false; 
 
+        // --- APP GLOBALS ---
+        let currentData = null; 
+        let currentPage = 'dashboard'; 
+        let chartInstance = null; 
+
+        // --- DOM ELEMENTS ---
         const canvas = document.getElementById('fundraisingChart');
         const inputForm = document.getElementById('input-form');
         const messageBox = document.getElementById('message-box');
+        const loadingInputs = document.getElementById('loading-inputs');
+        const authStatus = document.getElementById('auth-status');
+        const userInfo = document.getElementById('user-info');
         
         const dashboardScreen = document.getElementById('dashboard-screen');
         const displayScreen = document.getElementById('display-screen');
         const navDashboard = document.getElementById('nav-dashboard');
         const navDisplay = document.getElementById('nav-display');
         
-        // Initial list of classes to track
+        // Initial list of classes to track - This defines the chart display order now.
         const CLASS_LIST = ['3F', '3V', '4S', '4T', '5L', '5N', '5W', '6NW', '6SW', '7B', '7KV', '7SV'];
         
-        // Default data structure if no data exists
+        // Default data structure if no data exists (used for initial Firestore write if doc doesn't exist)
         const DEFAULT_DATA = CLASS_LIST.reduce((acc, className) => {
             acc[className] = 1; 
             return acc;
-        }, { lastUpdated: new Date().toISOString() });
+        }, {});
         
         // Pallete of colors for the chart
         const BAR_COLORS = [
-            '#ef4444', // Red 500
-            '#f97316', // Orange 500
-            '#eab308', // Yellow 500
-            '#22c55e', // Green 500
-            '#06b6d4', // Cyan 500
-            '#3b82f6', // Blue 500
-            '#8b5cf6', // Violet 500
-            '#ec4899', // Pink 500
-            '#6b7280', // Gray 500
-            '#ca8a04', // Amber 600
-            '#16a34a', // Green 600
-            '#075985', // Sky 800
+            '#ef4444', '#f97316', '#eab308', '#22c55e', '#06b6d4', 
+            '#3b82f6', '#8b5cf6', '#ec4899', '#6b7280', '#ca8a04', 
+            '#16a34a', '#075985',
         ];
-
 
         // --- NAVIGATION FUNCTIONS ---
         
         /**
          * Switches the active screen view and ensures the chart is redrawn if needed.
-         * @param {string} page 'dashboard' or 'display'
          */
         window.navigate = function(page) {
             currentPage = page;
@@ -153,7 +174,7 @@
             dashboardScreen.classList.toggle('hidden', page !== 'dashboard');
             displayScreen.classList.toggle('hidden', page !== 'display');
 
-            // Update navigation button styles (using red classes)
+            // Update navigation button styles 
             navDashboard.className = `px-4 py-2 mx-2 rounded-full font-semibold transition duration-200 shadow-md ${page === 'dashboard' ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-white text-red-600 hover:bg-red-50 border border-red-600'}`;
             navDisplay.className = `px-4 py-2 mx-2 rounded-full font-semibold transition duration-200 shadow-md ${page === 'display' ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-white text-red-600 hover:bg-red-50 border border-red-600'}`;
 
@@ -168,101 +189,129 @@
 
         /**
          * Shows a temporary confirmation message.
-         * @param {string} message 
          */
         function showMessage(message) {
             messageBox.textContent = message;
-            messageBox.classList.remove('hidden');
+            messageBox.classList.remove('hidden', 'bg-red-100', 'text-red-700');
+            messageBox.classList.add('bg-green-100', 'text-green-700');
             setTimeout(() => {
                 messageBox.classList.add('hidden');
             }, 3000);
         }
-
-        /**
-         * Converts the class object data into an array of {name, total} objects,
-         * filters for valid entries, and sorts them by total (highest to lowest).
-         * @param {Object} data 
-         * @returns {Array<Object>} Sorted array of class data (Descending).
-         */
-        function prepareData(data) {
-            if (!data) return [];
-            
-            return Object.keys(data)
-                .filter(key => CLASS_LIST.includes(key)) // Only include tracked classes
-                .map(key => ({ 
-                    name: key, 
-                    total: parseInt(data[key] || 1) // Ensures minimum display of 1
-                }))
-                // Sort in DESCENDING order (b - a) so winner is at index 0
-                .sort((a, b) => b.total - a.total); 
-        }
-
-        // --- LOCAL STORAGE FUNCTIONS ---
-
-        /**
-         * Loads data from localStorage or returns default data.
-         * @returns {Object}
-         */
-        function loadLocalData() {
-            try {
-                const storedData = localStorage.getItem(LOCAL_STORAGE_KEY);
-                if (storedData) {
-                    return JSON.parse(storedData);
-                }
-            } catch (e) {
-                console.error("Error loading from localStorage, using default data.", e);
-            }
-            return DEFAULT_DATA;
-        }
-
-        /**
-         * Saves the entire currentData object to localStorage.
-         */
-        function saveLocalData() {
-            if (currentData) {
-                try {
-                    currentData.lastUpdated = new Date().toISOString();
-                    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(currentData));
-                    // Manually trigger a redraw in case another local tab is open
-                    window.dispatchEvent(new Event('storage'));
-                } catch (e) {
-                    console.error("Error saving to localStorage.", e);
-                }
-            }
-        }
         
         /**
-         * Updates a single class's total in local data and saves it.
-         * @param {string} className 
-         * @param {number} total 
+         * Shows a temporary error message.
          */
-        function updateLocalData(className, total) {
-            currentData[className] = total;
-            saveLocalData();
-            showMessage(`${className} total updated to ${total} books collected.`);
-            renderInputs(currentData);
+         function showError(message) {
+            messageBox.textContent = message;
+            messageBox.classList.remove('hidden', 'bg-green-100', 'text-green-700');
+            messageBox.classList.add('bg-red-100', 'text-red-700');
+            setTimeout(() => {
+                messageBox.classList.add('hidden');
+            }, 5000);
         }
 
         /**
-         * Handles updates when other tabs/windows change localStorage.
-         * Note: The 'storage' event only fires on other windows, not the one that saved the data.
+         * Converts the class object data into {labels, totals} arrays in CLASS_LIST order,
+         * and finds the grand total and current leader. No sorting is applied to the chart data.
          */
-        function handleStorageChange(e) {
-            if (e.key === LOCAL_STORAGE_KEY) {
-                console.log("LocalStorage changed externally, reloading data.");
-                currentData = loadLocalData();
+        function prepareData(data) {
+            if (!data) return { labels: [], totals: [], grandTotal: 0, leader: { name: '', total: -1 } };
+            
+            let grandTotal = 0;
+            let leader = { name: '', total: -1 };
+
+            const chartLabels = [];
+            const chartTotals = [];
+            
+            CLASS_LIST.forEach(className => {
+                // Ensure data read from Firestore is treated as an integer, default to 1 if missing or invalid
+                const total = parseInt(data[className] || 1); 
+                grandTotal += total; 
+                
+                chartLabels.push(className);
+                chartTotals.push(total);
+                
+                // Check for leader while iterating (handles ties by keeping the first class found)
+                if (total > leader.total) {
+                    leader = { name: className, total: total };
+                }
+            });
+            
+            return { labels: chartLabels, totals: chartTotals, grandTotal, leader };
+        }
+
+        // --- FIREBASE DATA FUNCTIONS ---
+
+        /**
+         * Sets up the real-time listener for the public score document.
+         */
+        function startRealtimeListener() {
+            if (!db || !appId) {
+                console.error("Firestore not initialized.");
+                return;
+            }
+
+            // Public path for shared data: /artifacts/{appId}/public/data/book_drive_scores/current_scores
+            const scoreDocRef_ = docRef(db, 'artifacts', appId, 'public', 'data', 'book_drive_scores', 'current_scores');
+            
+            onSnapshotFn(scoreDocRef_, (docSnap) => {
+                if (!isAuthReady) return; // Wait for initial auth/setup to finish
+
+                if (docSnap.exists()) {
+                    // Data exists, update the global state and UI
+                    currentData = docSnap.data();
+                    console.log("Real-time data updated:", currentData);
+                } else {
+                    // Document does not exist yet, initialize it with default data
+                    console.log("No data found, initializing document with default scores.");
+                    setDocFn(scoreDocRef_, { ...DEFAULT_DATA, initialized: true }).catch(e => console.error("Error initializing data:", e));
+                    currentData = DEFAULT_DATA;
+                }
+                
+                // Render UI after data is loaded/updated
+                loadingInputs.classList.add('hidden');
+                inputForm.classList.remove('hidden');
                 renderInputs(currentData);
                 if (currentPage === 'display') {
                     renderChart(currentData);
                 }
-            }
+            }, (error) => {
+                console.error("Firestore listening error:", error);
+                authStatus.textContent = "Error loading data. Check console.";
+                loadingInputs.innerHTML = '<p class="text-red-600">Failed to load data. See console for details.</p>';
+                inputForm.classList.add('hidden');
+            });
         }
 
+        /**
+         * Updates a single class's total in the remote Firestore document.
+         */
+        async function updateRemoteData(className, total) {
+            if (!db || !appId || !isAuthReady) {
+                console.warn("Database not ready or not authenticated.");
+                return;
+            }
+
+            const scoreDocRef_ = docRef(db, 'artifacts', appId, 'public', 'data', 'book_drive_scores', 'current_scores');
+            
+            // Use an object to update only the specific field, merging with existing data
+            const updateObject = { [className]: total };
+
+            try {
+                await setDocFn(scoreDocRef_, updateObject, { merge: true });
+                showMessage(`${className} total updated to ${total} books collected.`);
+                // Note: The onSnapshot listener will handle updating currentData and redrawing the UI
+            } catch (e) {
+                console.error("Error writing document: ", e);
+                showError(`Failed to save data for ${className}.`);
+            }
+        }
+        
         // --- RENDER FUNCTIONS ---
 
         /**
          * Renders the input form based on the current data.
-         * @param {Object} data 
          */
         function renderInputs(data) {
             inputForm.innerHTML = ''; 
@@ -290,7 +339,8 @@
                     e.target.value = newValue; 
                     
                     if (newValue !== currentValue) {
-                        updateLocalData(className, newValue); // Call local update function
+                        // Call the remote data update function
+                        updateRemoteData(className, newValue); 
                     }
                 });
 
@@ -306,87 +356,79 @@
         }
 
         /**
-         * Creates or updates the Chart.js horizontal bar chart.
-         * @param {Object} data 
+         * Creates or updates the Chart.js vertical bar chart.
          */
         function renderChart(data) {
-            const dataArray = prepareData(data);
-            if (dataArray.length === 0) return;
+            const { labels: chartLabels, totals: chartTotals, grandTotal, leader } = prepareData(data);
+            if (chartLabels.length === 0) return;
 
-            const labels = dataArray.map(item => item.name);
-            const totals = dataArray.map(item => item.total);
+            // Determine colors based on the unsorted list, highlighting the overall leader
+            const chartBackgroundColors = chartTotals.map((total, index) => {
+                // Check if the current bar is the leader
+                const isWinner = chartLabels[index] === leader.name && total === leader.total;
+                return isWinner ? '#f59e0b' : BAR_COLORS[index % BAR_COLORS.length]; // Gold for winner
+            });
+
+            const chartBorderColors = chartBackgroundColors.map(color => color === '#f59e0b' ? '#ca8a04' : color);
+
+            // --- Update Summary DOM Element ---
+            const totalSummaryDiv = document.getElementById('total-summary');
+            const formattedTotal = new Intl.NumberFormat('en-US').format(grandTotal);
+            const leaderName = leader.name || 'N/A';
+            const leaderTotal = new Intl.NumberFormat('en-US').format(leader.total) || 'N/A';
             
-            // Chart.js requires data to be reversed to show winner (highest value) at the top of a horizontal bar chart
-            const reversedLabels = [...labels].reverse();
-            const reversedTotals = [...totals].reverse();
-            
-            // Map colors to the reversed data set (winner is now the last element pushed, first element in reversed array)
-            const reversedBackgroundColors = [];
-            const reversedBorderColors = [];
-            
-            for (let i = 0; i < dataArray.length; i++) {
-                // The winner (index 0 in dataArray) is the last element in the reversed set (pushed first)
-                const isWinner = i === 0;
-                const color = isWinner ? '#f59e0b' : BAR_COLORS[i % BAR_COLORS.length]; // Gold for winner
-                const borderColor = isWinner ? '#ca8a04' : color;
+            totalSummaryDiv.innerHTML = `
+                <p class="text-xl font-bold text-red-800">
+                    <span class="text-3xl font-extrabold">${formattedTotal}</span> TOTAL BOOKS COLLECTED
+                </p>
+                <p class="text-sm text-gray-700 mt-1">
+                    Current Leader: <span class="font-bold text-red-600">${leaderName}</span> with ${leaderTotal} books!
+                </p>
+            `;
+            // --- End Update Summary DOM Element ---
 
-                // Push to the beginning of the arrays to match the reversed order
-                reversedBackgroundColors.unshift(color);
-                reversedBorderColors.unshift(borderColor);
-            }
-
-
-            // --- Core Fix: Destroy existing chart instance to force clean redraw ---
+            // Destroy existing chart instance to force clean redraw
             if (chartInstance) {
                 chartInstance.destroy();
                 chartInstance = null;
             }
-            // --- End Core Fix ---
 
             // Create new chart instance
             chartInstance = new Chart(canvas, {
                 type: 'bar',
                 data: {
-                    labels: reversedLabels,
+                    labels: chartLabels, // Unsorted order
                     datasets: [{
                         label: 'Books Collected',
-                        data: reversedTotals,
-                        backgroundColor: reversedBackgroundColors,
-                        borderColor: reversedBorderColors,
+                        data: chartTotals, // Unsorted order
+                        backgroundColor: chartBackgroundColors,
+                        borderColor: chartBorderColors,
                         borderWidth: 1,
                         borderRadius: 8,
                         borderSkipped: false,
                     }]
                 },
                 options: {
-                    indexAxis: 'y', // Make it a horizontal bar chart
                     responsive: true,
                     maintainAspectRatio: false,
                     animation: {
-                        duration: 700 // Add a smooth animation on update
+                        duration: 700 
                     },
                     plugins: {
-                        legend: {
-                            display: false,
-                        },
+                        legend: { display: false },
                         title: {
                             display: true,
-                            text: 'Local Book Totals by Class',
-                            color: '#b91c1c', // Red 700
-                            font: {
-                                size: 18,
-                                weight: 'bold'
-                            }
+                            text: 'Class Rankings (Unsorted Order)', 
+                            color: '#b91c1c', 
+                            font: { size: 18, weight: 'bold' }
                         },
                         tooltip: {
                             callbacks: {
-                                label: function(context) {
+                                label: (context) => {
                                     let label = context.dataset.label || '';
-                                    if (label) {
-                                        label += ': ';
-                                    }
-                                    if (context.parsed.x !== null) {
-                                        label += new Intl.NumberFormat('en-US').format(context.parsed.x) + ' books';
+                                    if (label) label += ': ';
+                                    if (context.parsed.y !== null) { 
+                                        label += new Intl.NumberFormat('en-US').format(context.parsed.y) + ' books';
                                     }
                                     return label;
                                 }
@@ -394,31 +436,17 @@
                         }
                     },
                     scales: {
-                        x: {
-                            beginAtZero: true,
-                            title: {
-                                display: true,
-                                text: 'Total Books',
-                                color: '#4b5563'
-                            },
-                            ticks: {
-                                color: '#1f2937',
-                                callback: function(value) {
-                                    // Use compact notation for large numbers
-                                    return Intl.NumberFormat('en-US', { notation: 'compact' }).format(value);
-                                }
-                            }
+                        x: { 
+                            title: { display: true, text: 'Class Name', color: '#4b5563' },
+                            ticks: { color: '#1f2937', font: { weight: 'bold', size: 14 } },
+                            grid: { display: false }
                         },
-                        y: {
+                        y: { 
+                            beginAtZero: true,
+                            title: { display: true, text: 'Total Books', color: '#4b5563' },
                             ticks: {
                                 color: '#1f2937',
-                                font: {
-                                    weight: 'bold',
-                                    size: 14
-                                }
-                            },
-                            grid: {
-                                display: false // Hide horizontal grid lines
+                                callback: (value) => Intl.NumberFormat('en-US', { notation: 'compact' }).format(value)
                             }
                         }
                     }
@@ -429,23 +457,59 @@
         // --- INITIALIZATION ---
         
         /**
-         * Runs on app load to initialize data and listeners.
+         * Handles Firebase initialization and authentication.
          */
-        function initializeApp() {
-            // 1. Load data from local storage
-            currentData = loadLocalData();
-            
-            // 2. Render initial inputs
-            renderInputs(currentData);
+        async function initializeApp() {
+            try {
+                // Global variables from the environment
+                const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+                const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+                appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
-            // 3. Set up listener for other tabs updating local storage
-            window.addEventListener('storage', handleStorageChange);
+                if (!firebaseConfig) {
+                    throw new Error("Firebase configuration is missing.");
+                }
+
+                app = initApp(firebaseConfig);
+                db = dbFn(app);
+                auth = authFn(app);
+                
+                // Optional: Enable Firestore debug logs
+                // setLogLevel('Debug');
+
+                // 1. Handle Authentication
+                onAuthChange(auth, (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        isAuthReady = true;
+                        authStatus.textContent = "Real-time data enabled. All updates are instant.";
+                        userInfo.innerHTML = `App ID: ${appId} | User ID: ${userId}`;
+                        startRealtimeListener(); // Start listening only after auth is confirmed
+                    } else {
+                        isAuthReady = false;
+                        authStatus.textContent = "Authentication required.";
+                    }
+                });
+
+                // Try to sign in with the custom token or anonymously if not provided
+                if (initialAuthToken) {
+                    await signInCustom(auth, initialAuthToken);
+                } else {
+                    await signInAnon(auth);
+                }
+
+            } catch (error) {
+                console.error("Initialization Error:", error);
+                authStatus.textContent = `Initialization Error: ${error.message}`;
+            }
         }
 
         initializeApp();
     </script>
 </body>
 </html>
+
+
 
 
 
