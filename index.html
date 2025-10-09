@@ -31,7 +31,10 @@
         <header class="text-center py-6 bg-white shadow-md sticky top-0 z-10">
             <!-- Updated header title color to red-700 -->
             <h1 class="text-3xl sm:text-4xl font-extrabold text-red-700">Clifton Book Drive 2025</h1>
-            <p id="auth-status" class="mt-1 text-xs text-gray-500"></p>
+            <!-- Auth status replaced with Local Status message -->
+            <p id="auth-status" class="mt-1 text-xs font-semibold text-blue-500">
+                Data saved locally on this browser using localStorage.
+            </p>
         </header>
 
         <!-- Navigation Bar -->
@@ -58,9 +61,8 @@
                 <h2 class="text-2xl font-semibold mb-4 text-red-600 border-b pb-2">
                     Update Books Collected Totals
                 </h2>
-                <div id="loading-inputs" class="text-center py-8">
-                    <!-- Updated loading spinner color to red-600 -->
-                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-red-600 mx-auto"></div>
+                <div id="loading-inputs" class="text-center py-8 hidden">
+                    <!-- Loading is instant with localStorage, hide this initially -->
                     <p class="mt-2 text-gray-500">Loading data...</p>
                 </div>
                 <div id="input-form" class="space-y-4 max-h-96 overflow-y-auto scrollbar-hidden">
@@ -75,7 +77,7 @@
             <div class="p-6 bg-white rounded-xl shadow-2xl border border-gray-100">
                 <!-- Updated heading color to red-600 and text changed -->
                 <h2 class="text-2xl font-semibold mb-4 text-red-600 border-b pb-2">
-                    Which class is winning! (Live Leaderboard)
+                    Which class is winning! (Local Leaderboard)
                 </h2>
                 
                 <!-- Updated border and background colors to use red shades -->
@@ -94,38 +96,18 @@
 
     </div>
 
-    <!-- Firebase SDKs and Chart Logic -->
+    <!-- Local Storage and Chart Logic -->
     <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, setDoc, onSnapshot, collection, query, getDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-        import { setLogLevel } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-
-        // Enable Firebase debugging
-        setLogLevel('Debug');
-
         // --- GLOBAL VARIABLES ---
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = JSON.parse(typeof __firebase_config !== 'undefined' ? __firebase_config : '{}');
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-
-        let db;
-        let auth;
-        let userId = null;
         let currentData = null; // Store fetched data globally
         let currentPage = 'dashboard'; // Initial page state
-        let isInitialLoadComplete = false; 
         let chartInstance = null; // Global Chart.js instance
 
-        const CHART_DOC_PATH = `/artifacts/${appId}/public/data/fundraising_data`;
-        const CHART_DOC_ID = 'clifton_book_drive';
+        const LOCAL_STORAGE_KEY = 'clifton_book_drive_data';
 
         const canvas = document.getElementById('fundraisingChart');
         const inputForm = document.getElementById('input-form');
-        const loadingInputs = document.getElementById('loading-inputs');
         const messageBox = document.getElementById('message-box');
-        const authStatus = document.getElementById('auth-status');
-        const chartOverlay = document.getElementById('chart-overlay');
         
         const dashboardScreen = document.getElementById('dashboard-screen');
         const displayScreen = document.getElementById('display-screen');
@@ -135,7 +117,7 @@
         // Initial list of classes to track
         const CLASS_LIST = ['3F', '3V', '4S', '4T', '5L', '5N', '5W', '6NW', '6SW', '7B', '7KV', '7SV'];
         
-        // Default data structure if no data exists in Firestore
+        // Default data structure if no data exists
         const DEFAULT_DATA = CLASS_LIST.reduce((acc, className) => {
             acc[className] = 1; 
             return acc;
@@ -161,7 +143,7 @@
         // --- NAVIGATION FUNCTIONS ---
         
         /**
-         * Switches the active screen view.
+         * Switches the active screen view and ensures the chart is redrawn if needed.
          * @param {string} page 'dashboard' or 'display'
          */
         window.navigate = function(page) {
@@ -177,9 +159,6 @@
 
             // Re-render chart if navigating to the display page AND data is loaded
             if (page === 'display' && currentData) {
-                // When navigating to the display page, we always call renderChart. 
-                // This ensures the chart is created/recreated correctly with new dimensions 
-                // after the 'display-screen' is made visible.
                 renderChart(currentData);
             }
         }
@@ -218,131 +197,64 @@
                 .sort((a, b) => b.total - a.total); 
         }
 
-        // --- FIREBASE FUNCTIONS ---
+        // --- LOCAL STORAGE FUNCTIONS ---
 
         /**
-         * Initializes Firebase and handles authentication.
+         * Loads data from localStorage or returns default data.
+         * @returns {Object}
          */
-        async function setupFirebase() {
+        function loadLocalData() {
             try {
-                // Check if the configuration object is valid before initialization
-                if (!firebaseConfig || !firebaseConfig.projectId) {
-                    console.error("CRITICAL ERROR: Firebase configuration is missing 'projectId'. Cannot initialize Firebase.");
-                    authStatus.textContent = `CRITICAL ERROR: Firebase setup failed (Missing Project ID). Data is static.`;
-                    loadingInputs.classList.add('hidden'); 
-                    renderInputs(DEFAULT_DATA); 
-                    isInitialLoadComplete = true; 
-                    currentData = DEFAULT_DATA;
-                    return; 
+                const storedData = localStorage.getItem(LOCAL_STORAGE_KEY);
+                if (storedData) {
+                    return JSON.parse(storedData);
                 }
-
-                const app = initializeApp(firebaseConfig);
-                db = getFirestore(app);
-                auth = getAuth(app);
-
-                // Authenticate the user
-                if (initialAuthToken) {
-                    await signInWithCustomToken(auth, initialAuthToken);
-                } else {
-                    await signInAnonymously(auth);
-                }
-
-                onAuthStateChanged(auth, async (user) => {
-                    if (user) {
-                        userId = user.uid;
-                        authStatus.textContent = `User ID: ${userId} (Live Updates Active)`;
-                        
-                        await initializeDataAndListeners();
-                    } else {
-                        authStatus.textContent = `Authentication failed. Using default data.`;
-                        userId = null;
-                        loadingInputs.classList.add('hidden'); 
-                        renderInputs(DEFAULT_DATA);
-                        currentData = DEFAULT_DATA;
-                        isInitialLoadComplete = true; 
-                    }
-                });
-
-            } catch (error) {
-                console.error("Error setting up Firebase:", error);
-                authStatus.textContent = `Firebase Error: ${error.message}`;
-                loadingInputs.classList.add('hidden'); 
+            } catch (e) {
+                console.error("Error loading from localStorage, using default data.", e);
             }
+            return DEFAULT_DATA;
         }
 
         /**
-         * Ensures the initial document exists and sets up the snapshot listener.
+         * Saves the entire currentData object to localStorage.
          */
-        async function initializeDataAndListeners() {
-            const docRef = doc(db, CHART_DOC_PATH, CHART_DOC_ID);
-            
-            // Check if document exists and create it if it doesn't
-            const docSnap = await getDoc(docRef);
-            if (!docSnap.exists()) {
-                console.log("Document not found. Creating with default values.");
-                await setDoc(docRef, DEFAULT_DATA);
+        function saveLocalData() {
+            if (currentData) {
+                try {
+                    currentData.lastUpdated = new Date().toISOString();
+                    localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(currentData));
+                    // Manually trigger a redraw in case another local tab is open
+                    window.dispatchEvent(new Event('storage'));
+                } catch (e) {
+                    console.error("Error saving to localStorage.", e);
+                }
             }
-
-            // Set up real-time listener
-            onSnapshot(docRef, (doc) => {
-                const data = doc.data() || DEFAULT_DATA;
-                currentData = data; 
-                
-                // Only hide the loading spinner once the initial data snapshot is received
-                if (!isInitialLoadComplete) {
-                    loadingInputs.classList.add('hidden');
-                    isInitialLoadComplete = true;
-                    // Navigate to the correct page after initial load
-                    navigate(currentPage);
-                }
-                
-                chartOverlay.classList.add('hidden'); 
-                renderInputs(data);
-                
-                // Update chart if currently visible. We update/recreate the chart here 
-                // to handle real-time changes while the display screen is open.
-                if (currentPage === 'display') {
-                    renderChart(data);
-                }
-            }, (error) => {
-                console.error("Snapshot listener error:", error);
-                chartOverlay.classList.add('hidden');
-                loadingInputs.classList.add('hidden'); 
-                
-                // If the listener fails, we can't get data, so navigate anyway.
-                if (!isInitialLoadComplete) {
-                    navigate(currentPage);
-                    isInitialLoadComplete = true;
-                }
-            });
         }
         
         /**
-         * Updates a single class's total in Firestore.
+         * Updates a single class's total in local data and saves it.
          * @param {string} className 
          * @param {number} total 
          */
-        async function saveData(className, total) {
-            if (!db || !userId) {
-                showMessage("Authentication not ready. Cannot save data.");
-                return;
-            }
-            
-            const docRef = doc(db, CHART_DOC_PATH, CHART_DOC_ID);
-            
-            try {
-                chartOverlay.classList.remove('hidden'); 
+        function updateLocalData(className, total) {
+            currentData[className] = total;
+            saveLocalData();
+            showMessage(`${className} total updated to ${total} books collected.`);
+            renderInputs(currentData);
+        }
 
-                await setDoc(docRef, { 
-                    [className]: total,
-                    lastUpdated: new Date().toISOString(),
-                    lastUpdatedBy: userId
-                }, { merge: true });
-
-                showMessage(`${className} total updated to ${total} books collected.`);
-            } catch (error) {
-                console.error("Error saving data:", error);
-                showMessage(`Error: Could not save data for ${className}.`);
+        /**
+         * Handles updates when other tabs/windows change localStorage.
+         * Note: The 'storage' event only fires on other windows, not the one that saved the data.
+         */
+        function handleStorageChange(e) {
+            if (e.key === LOCAL_STORAGE_KEY) {
+                console.log("LocalStorage changed externally, reloading data.");
+                currentData = loadLocalData();
+                renderInputs(currentData);
+                if (currentPage === 'display') {
+                    renderChart(currentData);
+                }
             }
         }
 
@@ -378,7 +290,7 @@
                     e.target.value = newValue; 
                     
                     if (newValue !== currentValue) {
-                        saveData(className, newValue);
+                        updateLocalData(className, newValue); // Call local update function
                     }
                 });
 
@@ -395,9 +307,7 @@
 
         /**
          * Creates or updates the Chart.js horizontal bar chart.
-         * IMPORTANT: This function now always destroys and recreates the chart 
-         * to handle dimension updates when the display screen is toggled visible/hidden.
-         * * @param {Object} data 
+         * @param {Object} data 
          */
         function renderChart(data) {
             const dataArray = prepareData(data);
@@ -461,7 +371,7 @@
                         },
                         title: {
                             display: true,
-                            text: 'Live Book Totals by Class',
+                            text: 'Local Book Totals by Class',
                             color: '#b91c1c', // Red 700
                             font: {
                                 size: 18,
@@ -518,10 +428,25 @@
         
         // --- INITIALIZATION ---
         
-        setupFirebase();
+        /**
+         * Runs on app load to initialize data and listeners.
+         */
+        function initializeApp() {
+            // 1. Load data from local storage
+            currentData = loadLocalData();
+            
+            // 2. Render initial inputs
+            renderInputs(currentData);
+
+            // 3. Set up listener for other tabs updating local storage
+            window.addEventListener('storage', handleStorageChange);
+        }
+
+        initializeApp();
     </script>
 </body>
 </html>
+
 
 
 
