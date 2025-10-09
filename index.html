@@ -58,8 +58,6 @@
 
         <!-- Dashboard View (Chart and Totals) -->
         <div id="dashboard-view" class="space-y-8 p-4 border border-gray-100 rounded-xl shadow-inner">
-            <!-- Removed the "Collection Results" h2 title -->
-
             <!-- Summary Totals -->
             <div class="flex justify-around text-center space-x-4">
                 <div class="p-4 bg-green-50 rounded-lg w-1/2 border border-green-200">
@@ -181,16 +179,19 @@
             const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
             let firebaseConfig = null;
-            if (typeof __firebase_config !== 'undefined') {
+            const configString = typeof __firebase_config !== 'undefined' ? __firebase_config : null;
+            
+            // CRITICAL FIX: Check if the string is provided AND is NOT empty before attempting parse.
+            if (configString && configString.trim().length > 0) {
                 try {
-                    firebaseConfig = JSON.parse(__firebase_config);
+                    firebaseConfig = JSON.parse(configString);
                 } catch (e) {
-                    console.error("FIREBASE: Failed to parse __firebase_config JSON.", e);
+                    console.error("FIREBASE: Failed to parse __firebase_config JSON. String provided was:", configString, e);
                 }
             }
 
             if (!firebaseConfig) {
-                const errorMessage = "CRITICAL: Firebase configuration is missing. Cannot initialize Firebase app.";
+                const errorMessage = "CRITICAL: Firebase configuration is missing. Cannot initialize Firebase app. Check environment variables.";
                 console.error(errorMessage);
                 updateStatus(errorMessage, true);
                 return; 
@@ -446,6 +447,7 @@
     </script>
 </body>
 </html>
+
 
 
 
