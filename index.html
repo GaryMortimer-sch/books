@@ -177,6 +177,9 @@
 
             // Re-render chart if navigating to the display page AND data is loaded
             if (page === 'display' && currentData) {
+                // When navigating to the display page, we always call renderChart. 
+                // This ensures the chart is created/recreated correctly with new dimensions 
+                // after the 'display-screen' is made visible.
                 renderChart(currentData);
             }
         }
@@ -258,7 +261,6 @@
                         currentData = DEFAULT_DATA;
                         isInitialLoadComplete = true; 
                     }
-                    // navigate(currentPage); // Navigation is handled when the first snapshot arrives or setup fails
                 });
 
             } catch (error) {
@@ -297,7 +299,8 @@
                 chartOverlay.classList.add('hidden'); 
                 renderInputs(data);
                 
-                // Update chart if currently visible
+                // Update chart if currently visible. We update/recreate the chart here 
+                // to handle real-time changes while the display screen is open.
                 if (currentPage === 'display') {
                     renderChart(data);
                 }
@@ -374,8 +377,6 @@
                     if (newValue < 1) newValue = 1; 
                     e.target.value = newValue; 
                     
-                    // Only save if the value has genuinely changed from the Firebase data (currentValue)
-                    // The onSnapshot listener will handle updating the chart immediately.
                     if (newValue !== currentValue) {
                         saveData(className, newValue);
                     }
@@ -394,7 +395,9 @@
 
         /**
          * Creates or updates the Chart.js horizontal bar chart.
-         * @param {Object} data 
+         * IMPORTANT: This function now always destroys and recreates the chart 
+         * to handle dimension updates when the display screen is toggled visible/hidden.
+         * * @param {Object} data 
          */
         function renderChart(data) {
             const dataArray = prepareData(data);
@@ -402,35 +405,44 @@
 
             const labels = dataArray.map(item => item.name);
             const totals = dataArray.map(item => item.total);
-            const backgroundColors = dataArray.map((_, index) => {
-                // Winner is the first item after sorting (index 0)
-                return index === 0 ? '#f59e0b' : BAR_COLORS[index % BAR_COLORS.length]; // Gold for winner
-            });
+            
+            // Chart.js requires data to be reversed to show winner (highest value) at the top of a horizontal bar chart
+            const reversedLabels = [...labels].reverse();
+            const reversedTotals = [...totals].reverse();
+            
+            // Map colors to the reversed data set (winner is now the last element pushed, first element in reversed array)
+            const reversedBackgroundColors = [];
+            const reversedBorderColors = [];
+            
+            for (let i = 0; i < dataArray.length; i++) {
+                // The winner (index 0 in dataArray) is the last element in the reversed set (pushed first)
+                const isWinner = i === 0;
+                const color = isWinner ? '#f59e0b' : BAR_COLORS[i % BAR_COLORS.length]; // Gold for winner
+                const borderColor = isWinner ? '#ca8a04' : color;
 
-            const borderColors = dataArray.map((_, index) => {
-                return index === 0 ? '#ca8a04' : backgroundColors[index];
-            });
-
-            // Destroy existing chart instance if it exists
-            if (chartInstance) {
-                chartInstance.data.labels = labels;
-                chartInstance.data.datasets[0].data = totals;
-                chartInstance.data.datasets[0].backgroundColor = backgroundColors;
-                chartInstance.data.datasets[0].borderColor = borderColors;
-                chartInstance.update();
-                return;
+                // Push to the beginning of the arrays to match the reversed order
+                reversedBackgroundColors.unshift(color);
+                reversedBorderColors.unshift(borderColor);
             }
+
+
+            // --- Core Fix: Destroy existing chart instance to force clean redraw ---
+            if (chartInstance) {
+                chartInstance.destroy();
+                chartInstance = null;
+            }
+            // --- End Core Fix ---
 
             // Create new chart instance
             chartInstance = new Chart(canvas, {
                 type: 'bar',
                 data: {
-                    labels: labels,
+                    labels: reversedLabels,
                     datasets: [{
                         label: 'Books Collected',
-                        data: totals,
-                        backgroundColor: backgroundColors,
-                        borderColor: borderColors,
+                        data: reversedTotals,
+                        backgroundColor: reversedBackgroundColors,
+                        borderColor: reversedBorderColors,
                         borderWidth: 1,
                         borderRadius: 8,
                         borderSkipped: false,
@@ -440,6 +452,9 @@
                     indexAxis: 'y', // Make it a horizontal bar chart
                     responsive: true,
                     maintainAspectRatio: false,
+                    animation: {
+                        duration: 700 // Add a smooth animation on update
+                    },
                     plugins: {
                         legend: {
                             display: false,
@@ -503,12 +518,13 @@
         
         // --- INITIALIZATION ---
         
-        // Removed unnecessary resize logic as Chart.js handles responsiveness internally
-        
         setupFirebase();
     </script>
 </body>
 </html>
+
+
+
 
 
 
