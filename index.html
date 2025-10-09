@@ -261,10 +261,10 @@
                 if (docSnap.exists()) {
                     // Data exists, update the global state and UI
                     currentData = docSnap.data();
-                    console.log("Real-time data updated:", currentData);
+                    console.log("FIREBASE: Real-time data updated.");
                 } else {
                     // Document does not exist yet, initialize it with default data
-                    console.log("No data found, initializing document with default scores.");
+                    console.log("FIREBASE: No data found, initializing document with default scores.");
                     setDocFn(scoreDocRef_, { ...DEFAULT_DATA, initialized: true }).catch(e => console.error("Error initializing data:", e));
                     currentData = DEFAULT_DATA;
                 }
@@ -277,9 +277,9 @@
                     renderChart(currentData);
                 }
             }, (error) => {
-                console.error("Firestore listening error:", error);
-                authStatus.textContent = "Error loading data. Check console.";
-                loadingInputs.innerHTML = '<p class="text-red-600">Failed to load data. See console for details.</p>';
+                console.error("FIREBASE: Firestore listening error:", error);
+                authStatus.textContent = "FATAL ERROR: Failed to listen for data changes.";
+                loadingInputs.innerHTML = '<p class="text-red-600 font-bold">Failed to load data. Check console for details.</p>';
                 inputForm.classList.add('hidden');
             });
         }
@@ -474,33 +474,34 @@
                 db = dbFn(app);
                 auth = authFn(app);
                 
-                // Optional: Enable Firestore debug logs
-                // setLogLevel('Debug');
-
-                // 1. Handle Authentication
+                // 1. Handle Authentication (Must be set up before sign-in attempt)
                 onAuthChange(auth, (user) => {
+                    if (isAuthReady) return; // Prevent double-triggering
+                    
                     if (user) {
                         userId = user.uid;
                         isAuthReady = true;
                         authStatus.textContent = "Real-time data enabled. All updates are instant.";
                         userInfo.innerHTML = `App ID: ${appId} | User ID: ${userId}`;
-                        startRealtimeListener(); // Start listening only after auth is confirmed
+                        console.log("FIREBASE: Authentication successful. User ID:", userId);
+                        startRealtimeListener(); 
                     } else {
-                        isAuthReady = false;
-                        authStatus.textContent = "Authentication required.";
+                        // This indicates a sign-out or initial null state.
+                        console.log("FIREBASE: Auth state changed to signed out/null.");
                     }
                 });
 
-                // Try to sign in with the custom token or anonymously if not provided
+                // 2. Trigger Authentication
                 if (initialAuthToken) {
                     await signInCustom(auth, initialAuthToken);
                 } else {
                     await signInAnon(auth);
                 }
-
+                
             } catch (error) {
-                console.error("Initialization Error:", error);
-                authStatus.textContent = `Initialization Error: ${error.message}`;
+                console.error("Initialization Error (Auth or Config):", error);
+                authStatus.textContent = `CRITICAL ERROR: Failed to connect or authenticate. Check console.`;
+                loadingInputs.innerHTML = `<p class="text-red-600 font-bold">Failed to connect to database. Authentication failed.</p>`;
             }
         }
 
@@ -508,6 +509,8 @@
     </script>
 </body>
 </html>
+
+
 
 
 
