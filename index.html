@@ -113,6 +113,7 @@
         let userId = null;
         let currentData = null; // Store fetched data globally
         let currentPage = 'dashboard'; // Initial page state
+        let isInitialLoadComplete = false; // NEW FLAG for controlling loading spinner state
 
         const CHART_DOC_PATH = `/artifacts/${appId}/public/data/fundraising_data`;
         const CHART_DOC_ID = 'clifton_book_drive';
@@ -224,8 +225,9 @@
                 if (!firebaseConfig || !firebaseConfig.projectId) {
                     console.error("CRITICAL ERROR: Firebase configuration is missing 'projectId'. Cannot initialize Firebase.");
                     authStatus.textContent = `CRITICAL ERROR: Firebase setup failed (Missing Project ID). Data is static.`;
-                    loadingInputs.classList.add('hidden');
-                    renderInputs(DEFAULT_DATA); // Render inputs with static defaults
+                    loadingInputs.classList.add('hidden'); 
+                    renderInputs(DEFAULT_DATA); 
+                    isInitialLoadComplete = true; // Mark as complete even on static path
                     return; // Stop execution if configuration is invalid
                 }
 
@@ -251,7 +253,9 @@
                         authStatus.textContent = `Authentication failed. Using default data.`;
                         userId = null;
                         // Render inputs and chart with default data if auth fails
+                        loadingInputs.classList.add('hidden'); // Hide if auth fails
                         renderInputs(DEFAULT_DATA);
+                        isInitialLoadComplete = true; 
                     }
                     navigate(currentPage); // Ensure correct screen is shown after auth
                 });
@@ -259,6 +263,7 @@
             } catch (error) {
                 console.error("Error setting up Firebase:", error);
                 authStatus.textContent = `Firebase Error: ${error.message}`;
+                loadingInputs.classList.add('hidden'); // Hide on general error
             }
         }
 
@@ -280,6 +285,12 @@
                 const data = doc.data() || DEFAULT_DATA;
                 currentData = data; // Update global data
                 
+                // FIX: Only hide the loading spinner once the initial data snapshot is received
+                if (!isInitialLoadComplete) {
+                    loadingInputs.classList.add('hidden');
+                    isInitialLoadComplete = true;
+                }
+                
                 chartOverlay.classList.add('hidden'); // Hide overlay after data received
                 renderInputs(data);
                 
@@ -290,9 +301,10 @@
             }, (error) => {
                 console.error("Snapshot listener error:", error);
                 chartOverlay.classList.add('hidden');
+                loadingInputs.classList.add('hidden'); // Ensure spinner is hidden on listener error
             });
             
-            loadingInputs.classList.add('hidden'); // Hide initial loading spinner
+            // Removed premature hiding of loadingInputs from here.
         }
         
         /**
@@ -473,6 +485,8 @@
     </script>
 </body>
 </html>
+
+
 
 
 
