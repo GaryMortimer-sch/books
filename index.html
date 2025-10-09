@@ -248,7 +248,7 @@
          */
         function startRealtimeListener() {
             if (!db || !appId) {
-                console.error("Firestore not initialized.");
+                console.error("FIREBASE: Firestore not initialized.");
                 return;
             }
 
@@ -264,7 +264,7 @@
                     console.log("FIREBASE: Real-time data updated.");
                 } else {
                     // Document does not exist yet, initialize it with default data
-                    console.log("FIREBASE: No data found, initializing document with default scores.");
+                    console.log("FIREBASE: No data found, attempting to initialize document with default scores.");
                     setDocFn(scoreDocRef_, { ...DEFAULT_DATA, initialized: true }).catch(e => console.error("Error initializing data:", e));
                     currentData = DEFAULT_DATA;
                 }
@@ -466,8 +466,15 @@
                 const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
                 appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
 
+                // --- NEW DEBUG LOGGING ---
+                console.log("--- Firebase Initialization Check ---");
+                console.log("App ID:", appId);
+                console.log("Config loaded:", !!firebaseConfig);
+                console.log("Auth Token present:", !!initialAuthToken);
+                // --- END NEW DEBUG LOGGING ---
+
                 if (!firebaseConfig) {
-                    throw new Error("Firebase configuration is missing.");
+                    throw new Error("CRITICAL: Firebase configuration is missing. Cannot initialize Firebase app.");
                 }
 
                 app = initApp(firebaseConfig);
@@ -475,19 +482,23 @@
                 auth = authFn(app);
                 
                 // 1. Handle Authentication (Must be set up before sign-in attempt)
+                let listenerStarted = false; // Flag to ensure the listener only starts once
                 onAuthChange(auth, (user) => {
-                    if (isAuthReady) return; // Prevent double-triggering
-                    
-                    if (user) {
+                    // Only run the initialization sequence once a user is detected
+                    if (user && !listenerStarted) { 
                         userId = user.uid;
                         isAuthReady = true;
+                        listenerStarted = true; // Set flag to prevent future calls
                         authStatus.textContent = "Real-time data enabled. All updates are instant.";
                         userInfo.innerHTML = `App ID: ${appId} | User ID: ${userId}`;
                         console.log("FIREBASE: Authentication successful. User ID:", userId);
                         startRealtimeListener(); 
-                    } else {
-                        // This indicates a sign-out or initial null state.
-                        console.log("FIREBASE: Auth state changed to signed out/null.");
+                    } else if (!user && listenerStarted) {
+                         // This catches sign-outs after the app has loaded
+                        isAuthReady = false;
+                        authStatus.textContent = "Re-authenticating...";
+                        console.log("FIREBASE: User signed out. Data operations paused.");
+                        // Attempt re-sign-in if needed, though this environment handles it automatically.
                     }
                 });
 
@@ -495,12 +506,13 @@
                 if (initialAuthToken) {
                     await signInCustom(auth, initialAuthToken);
                 } else {
+                    // Fallback to anonymous sign-in if no token is available.
                     await signInAnon(auth);
                 }
                 
             } catch (error) {
                 console.error("Initialization Error (Auth or Config):", error);
-                authStatus.textContent = `CRITICAL ERROR: Failed to connect or authenticate. Check console.`;
+                authStatus.textContent = `CRITICAL ERROR: Failed to connect or authenticate. Check console for details.`;
                 loadingInputs.innerHTML = `<p class="text-red-600 font-bold">Failed to connect to database. Authentication failed.</p>`;
             }
         }
@@ -509,6 +521,7 @@
     </script>
 </body>
 </html>
+
 
 
 
